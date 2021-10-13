@@ -1,0 +1,4 @@
+-r test_black.txt
+
+# Twine for easy uploading to PyPi.
+twine

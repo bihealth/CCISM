@@ -1,0 +1,11 @@
+# Base requirements
+
+numpy
+scipy
+pandas
+vireoSNP
+
+# Documentation
+sphinx
+sphinx-rtd-theme
+docutils < 0.17
