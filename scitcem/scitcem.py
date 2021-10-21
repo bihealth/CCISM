@@ -6,6 +6,9 @@ import scipy.io
 import numpy as np
 import pandas as pd
 
+DTYPE = float
+EPS = np.finfo(DTYPE).eps
+
 
 def logchoose(n, k):
     """helper function logchoose using scipy.special.loggamma"""
@@ -20,7 +23,7 @@ def logchoose(n, k):
 def get_logbc(A, D):
     """helper function to get constant part of log likelihood"""
     nz = np.nonzero(D)
-    tmp = D.copy()
+    tmp = D.copy().astype(DTYPE)
     tmp[nz] = logchoose(D[nz], A[nz])
     return np.sum(tmp, axis=0).A1
 
@@ -37,26 +40,28 @@ def get_logP(A, D, th, logbc=None):
         + np.sum(D - A, axis=0).A1 * np.log(1 - th)
     )
 
-    return logP
+    return logP.astype(np.longdouble)
 
 
-def E_step(A, D, th, logbc=None):
+def E_step(A, D, th, logbc=None, check_overflow=True):
     """E step in expectation maximization"""
-
-    eps = np.finfo(float).eps
 
     log_pn = get_logP(A, D, th["normal"], logbc)
     log_pt = get_logP(A, D, th["tumor"], logbc)
 
-    diff = np.minimum(
-        -np.log(eps), np.maximum(np.abs(log_pn - log_pt), -np.log(1.0 - eps))
-    )
+    if check_overflow:
+        diff = np.minimum(
+            -np.log(EPS),
+            np.maximum(np.abs(log_pn - log_pt), -np.log(1.0 - EPS)),
+        )
+    else:
+        diff = np.abs(log_pn - log_pt)
     sign = np.sign(log_pn - log_pt)
 
     return 1.0 / (1.0 + np.exp(sign * diff))
 
 
-def M_step(A, D, p, th_N):
+def M_step(A, D, p, th_N=None):
     """M step in expectation maximization"""
 
     res = {}
@@ -71,19 +76,25 @@ def M_step(A, D, p, th_N):
     return res
 
 
-def get_logL(A, D, th, logbc=None):
+def get_logL(A, D, th, logbc=None, check_overflow=True):
     """get log likelihood"""
-    eps = np.finfo(float).eps
 
     log_pn = get_logP(A, D, th["normal"], logbc)
     log_pt = get_logP(A, D, th["tumor"], logbc)
 
-    maxlogp = np.minimum(
-        np.log(1.0 - eps), np.maximum(np.maximum(log_pn, log_pt), np.log(eps))
-    )
-    minlogp = np.minimum(
-        np.log(1.0 - eps), np.maximum(np.minimum(log_pn, log_pt), np.log(eps))
-    )
+    if check_overflow:
+        maxlogp = np.minimum(
+            np.log(1.0 - EPS),
+            np.maximum(np.maximum(log_pn, log_pt), np.log(EPS)),
+        )
+        minlogp = np.minimum(
+            np.log(1.0 - EPS),
+            np.maximum(np.minimum(log_pn, log_pt), np.log(EPS)),
+        )
+    else:
+        maxlogp = np.maximum(log_pn, log_pt)
+        minlogp = np.minimum(log_pn, log_pt)
+
     return np.sum(maxlogp + np.log(1.0 + np.exp(minlogp - maxlogp)))
 
 
@@ -102,7 +113,7 @@ def EMoptimize(
         if fit_normal:
             th_new = M_step(A, D, p)
         else:
-            th_new = M_step(A, D, p, th["normal"])
+            th_new = M_step(A, D, p, th_N=th["normal"])
 
         logL_new = get_logL(A, D, th_new, logbc=logbc)
 

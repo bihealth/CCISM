@@ -32,20 +32,22 @@ def main(argv=None):
         "-m",
         "--min_counts",
         dest="min_counts",
-        default=3,
+        default=1,
         type=int,
-        help="""min number of SNP-covering counts to include a cell [3]""",
+        help="""min number of SNP-covering counts to include a cell""",
     )
     additional.add_argument(
         "--thetaT",
         dest="thetaT",
         default=0.4,
+        type=float,
         help="""initial estimate for theta_T""",
     )
     additional.add_argument(
         "--thetaN",
         dest="thetaN",
-        default=0.01,
+        default=1.0e-4,
+        type=float,
         help="""fixed estimate for theta_N""",
     )
     additional.add_argument(
@@ -73,6 +75,7 @@ def main(argv=None):
         "--frac_tumor",
         dest="frac_tumor",
         default=0.5,
+        type=float,
         help="""tumor fraction for power estimation""",
     )
 

@@ -33,7 +33,7 @@ def test_run_scitcem():
     indir = os.path.join(os.path.dirname(__file__), "..", "test_data")
     outdir = tempfile.TemporaryDirectory().name
     scitcem.run_scitcem(
-        indir, outdir, 3, 0.4, 0.01, False, True, 10, 0.5, False
+        indir, outdir, 3, 0.4, 1.e-4, False, True, 10, 0.5, False
     )
 
     assert os.path.isfile(os.path.join(outdir, "results.txt"))

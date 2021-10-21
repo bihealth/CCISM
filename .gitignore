@@ -4,7 +4,7 @@ README.md
 install.sh
 
 # Sphinx.
-/docs_manual/_build
+/docs/_build
 
 # Mac
 .DS_Store
