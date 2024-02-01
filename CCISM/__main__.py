@@ -1,4 +1,4 @@
-"""This modules running as ``python -m scitcem``."""
+"""This modules running as ``python -m CCISM``."""
 
 import sys
 

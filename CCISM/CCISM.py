@@ -40,7 +40,7 @@ def get_logP(A, D, th, logbc=None):
         + np.sum(D - A, axis=0).A1 * np.log(1 - th)
     )
 
-    return logP.astype(np.longdouble)
+    return logP.astype(DTYPE)
 
 
 def E_step(A, D, th, logbc=None, check_overflow=True):
@@ -99,7 +99,7 @@ def get_logL(A, D, th, logbc=None, check_overflow=True):
 
 
 def EMoptimize(
-    A, D, thT_0, thN_0, verbose=False, max_diff=1.0e-5, fit_normal=False
+        A, D, thT_0, thN_0, verbose=False, max_diff=1.0e-5, fit_normal=False, max_iter=1000, min_iter=10
 ):
     """run expectation maximization"""
     logbc = get_logbc(A, D)
@@ -107,7 +107,7 @@ def EMoptimize(
     th = {"normal": thN_0, "tumor": thT_0}
 
     logL = 0
-    for i in range(10):
+    for i in range(max_iter):
 
         p = E_step(A, D, th, logbc=logbc)
         if fit_normal:
@@ -128,10 +128,10 @@ def EMoptimize(
                 "iter {0}, diff={1:.2g}, logL={2:.2g}\n".format(i, diff, logL)
             )
 
-        if i > 1 and diff < max_diff:
+        if i > min_iter and diff < max_diff:
             break
 
-    if i < 100:
+    if i < max_iter:
         if verbose:
             sys.stderr.write(
                 "optimization done. th_N={0:.2g}, th_T={1:.2g}\n".format(
@@ -146,7 +146,7 @@ def EMoptimize(
         "logL": logL,
         "thetaT": th["tumor"],
         "thetaN": th["normal"],
-        "method": "scitcem",
+        "method": "CCISM",
     }
 
 
@@ -203,7 +203,7 @@ def simulate_A(D, frac_tumor, thetaT, thetaN, seed=None):
     return A, tumor
 
 
-def read_cellSNP(indir):
+def read_cellSNP(indir, read_other=False):
     """read cellSNP output"""
 
     assert os.path.isdir(indir), (
@@ -247,15 +247,46 @@ def read_cellSNP(indir):
     assert os.path.isfile(D_file), "cellSNP.tag.DP.mtx missing from " + indir
     D = scipy.io.mmread(D_file).tocsr()
 
-    return {"cells": cells, "SNPs": SNPs, "A": A, "D": D}
+    if read_other:
+        O_file = os.path.join(indir, "cellSNP.tag.OTH.mtx")
+        assert os.path.isfile(D_file), "cellSNP.tag.OTH.mtx missing from " + indir
+        O = scipy.io.mmread(O_file).tocsr()
+    else:
+        O = None
+
+    return {"cells": cells, "SNPs": SNPs, "A": A, "D": D, "O": O}
 
 
-def run_scitcem(
+def read_SNVs(SNV_file):
+
+    assert os.path.isfile(SNV_file), "SNV file {0} missing".format(SNV_file)
+
+    if SNV_file.endswith('.vcf') or SNV_file.endswith('.vcf.gz'):
+        vcf = pd.read_csv(
+            SNV_file, skiprows=1, sep="\t", header=0, index_col=None
+        )
+        SNVs = vcf.apply(
+        lambda x: str(x["#CHROM"])
+        + ":"
+        + str(x["POS"])
+        + x["REF"]
+        + ">"
+        + x["ALT"],
+        axis=1,
+    ).values
+    else:
+        SNVs = np.array([line.strip() for line in open(SNV_file)])
+
+    return SNVs
+
+
+def run_CCISM(
     indir,
     outdir,
     min_counts,
     thetaT,
     thetaN,
+    SNV_file,
     use_vireo,
     estimate_power,
     nrep,
@@ -266,49 +297,59 @@ def run_scitcem(
     if not os.path.exists(outdir):
         os.makedirs(outdir)
 
+    if verbose:
+        sys.stderr.write('reading cellSNP output from '+indir+'\n')
     data = read_cellSNP(indir)
 
-    take_SNPs = data["D"].sum(1).A1 > 0
+    take_SNVs = data["D"].sum(1).A1 > 0
     take_cells = data["D"].sum(0).A1 >= min_counts
 
-    R = data["D"] - data["A"]
-    ref_SNPs = [
-        ",".join(data["SNPs"][data["D"][:, i].nonzero()[0]])
-        for i in range(R.shape[1])
+    if SNV_file is not None:
+        if verbose:
+            sys.stderr.write('restricting to SNVs in '+SNV_file+'\n')
+        use_SNVs = read_SNVs(SNV_file)
+        take_SNVs = take_SNVs & (np.isin(data['SNPs'],use_SNVs))
+
+    assert (
+        take_SNVs.sum() > 0
+        and take_cells.sum() > 0
+        and data["A"][take_SNVs, :][:, take_cells].sum() > 0
+    ), "not enough SNV information in this dataset!"
+
+    A = data["A"][take_SNVs, :]
+    D = data["D"][take_SNVs, :]
+    SNVs = data["SNPs"][take_SNVs]
+
+    all_SNVs = [
+        ",".join(SNVs[D[:, i].nonzero()[0]])
+        for i in range(D.shape[1])
     ]
-    alt_SNPs = [
-        ",".join(data["SNPs"][data["A"][:, i].nonzero()[0]])
-        for i in range(R.shape[1])
+    alt_SNVs = [
+        ",".join(SNVs[A[:, i].nonzero()[0]])
+        for i in range(D.shape[1])
     ]
 
     df = pd.DataFrame(
         {
             "p": np.nan,
-            "nSNPs_tot": (data["D"] > 0).sum(0).A1,
-            "nSNPs_ref": (R > 0).sum(0).A1,
-            "nSNPs_alt": (data["A"] > 0).sum(0).A1,
-            "nUMI_tot": data["D"].sum(0).A1,
-            "nUMI_ref": R.sum(0).A1,
-            "nUMI_alt": data["A"].sum(0).A1,
-            "ref_SNPs": ref_SNPs,
-            "alt_SNPs": alt_SNPs,
+            "nSNVs_tot": (D > 0).sum(0).A1,
+            "nSNVs_alt": (A > 0).sum(0).A1,
+            "nUMI_tot": D.sum(0).A1,
+            "nUMI_alt": A.sum(0).A1,
+            "all_SNVs": all_SNVs,
+            "alt_SNVs": alt_SNVs,
         },
         index=data["cells"],
     )
 
-    assert (
-        take_SNPs.sum() > 0
-        and take_cells.sum() > 0
-        and data["A"][take_SNPs, :][:, take_cells].sum() > 0
-    ), "not enough SNP information in this dataset!"
-
-    A = data["A"][take_SNPs, :][:, take_cells]
-    D = data["D"][take_SNPs, :][:, take_cells]
-
     if use_vireo:
-        res = vireo_optimize(A, D, verbose)
+        res = vireo_optimize(A[:,take_cells],
+                             D[:,take_cells],
+                             verbose)
     else:
-        res = EMoptimize(A, D, thetaT, thetaN, verbose)
+        res = EMoptimize(A[:,take_cells],
+                         D[:,take_cells],
+                         thetaT, thetaN, verbose)
 
     df.loc[take_cells, "p"] = np.round(res["p"], 3)
 
@@ -330,11 +371,11 @@ def run_scitcem(
         if verbose:
             sys.stderr.write("estimating power\n")
         for k in range(nrep):
-            At, label = simulate_A(D, frac_tumor, thetaT, thetaN, seed=k)
+            At, label = simulate_A(D[:, take_cells], frac_tumor, thetaT, thetaN, seed=k)
             res = (
-                vireo_optimize(At, D, verbose)
+                vireo_optimize(At, D[:, take_cells], verbose)
                 if use_vireo
-                else EMoptimize(At, D, thetaT, thetaN, verbose)
+                else EMoptimize(At, D[:, take_cells], thetaT, thetaN, verbose)
             )
             TP = np.sum(label & (res["p"] > 0.5))
             FP = np.sum(~label & (res["p"] > 0.5))

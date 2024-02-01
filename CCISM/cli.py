@@ -1,10 +1,10 @@
-"""Command line interface for scitcem.
+"""Command line interface for CCISM.
 
-This is the main program entry point for the ``scitcem`` executable
+This is the main program entry point for the ``CCISM`` executable
 """
 
 import argparse
-from .scitcem import run_scitcem
+from .CCISM import run_CCISM
 
 
 def main(argv=None):
@@ -46,7 +46,7 @@ def main(argv=None):
     additional.add_argument(
         "--thetaN",
         dest="thetaN",
-        default=1.0e-4,
+        default=0.01,
         type=float,
         help="""fixed estimate for theta_N""",
     )
@@ -56,6 +56,12 @@ def main(argv=None):
         action="store_true",
         default=False,
         help="""use vireo binomial mixture VB with two clones""",
+    )
+    additional.add_argument(
+        "--use_SNVs",
+        dest="use_SNVs",
+        default=None,
+        help="""restrict to SNVs from a file (either vcf or text file with each line like so [chrom]:[pos][ref]>[alt]"""
     )
     additional.add_argument(
         "--estimate_power",
@@ -82,12 +88,13 @@ def main(argv=None):
     args = parser.parse_args()
 
     if args.indir and args.outdir:
-        run_scitcem(
+        run_CCISM(
             args.indir,
             args.outdir,
             args.min_counts,
             args.thetaT,
             args.thetaN,
+            args.use_SNVs,
             args.use_vireo,
             args.estimate_power,
             args.nrep,
